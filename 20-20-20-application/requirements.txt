@@ -1,0 +1,9 @@
+# Windows
+pywin32
+pystray
+Pillow
+
+# macOS
+rumps
+pyobjc
+Pillow
