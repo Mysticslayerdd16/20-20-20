@@ -16,67 +16,52 @@ A lightweight Windows app that enforces the **20-20-20 rule** to reduce digital 
 - Hides from **Alt+Tab** — lives only in the system tray
 - No internet connection, no data collection, nothing stored to disk
 
-## Screenshot
-
-```
-┌─────────────────────────────┐
-│   20 · 20 · 20 · EYE GUARD │
-│                             │
-│          19:42              │  ← countdown to next break
-│       until break           │
-│  ████████████████░░  95%    │
-│                             │
-│  [3 done] [0 skip] [3 🔥]  │
-│                             │
-│   [PAUSE]        [RESET]    │
-└─────────────────────────────┘
-```
-
 ---
 
 ## Requirements
 
 - Windows 10 or 11
-- Python 3.8+
+- Python 3.8+ — download from [python.org](https://www.python.org/downloads/)
+  *(check "Add Python to PATH" during install)*
+
+---
 
 ## Installation
 
-### Option 1 — One-click installer (recommended)
+### Step 1 — Install dependencies
 
-1. Install [Python](https://www.python.org/downloads/) if you haven't already  
-   *(check "Add Python to PATH" during install)*
-2. Download or clone this repo
-3. Double-click **`install.bat`**
-4. Double-click **`eye_guard_2020.pyw`** to launch
+Double-click **`install.bat`** — it will install everything automatically.
 
-### Option 2 — Manual
-
+Or manually:
 ```bash
 pip install pywin32 pystray pillow
 ```
 
-Then double-click `eye_guard_2020.pyw` to run.
+### Step 2 — Run the app
+
+Double-click **`eye_guard_2020.pyw`**.
+
+No console window appears. The app runs silently in your **system tray** (bottom-right near the clock). Right-click the tray icon → **Quit** to exit.
 
 ---
 
-## Usage
+## Run on startup (optional but recommended)
 
-- **Double-click** `eye_guard_2020.pyw` to start — no console window appears
-- The app runs silently in your **system tray** (bottom-right near the clock)
-- **Right-click the tray icon** → Quit to exit
+So you never forget to launch it.
 
-### Run on startup (recommended)
+### Option A — One-click setup
+
+Double-click **`startup.bat`** and confirm. Done.
+
+To undo it later, double-click **`remove_startup.bat`**.
+
+### Option B — Manual setup
 
 1. Press `Win + R`, type `shell:startup`, press Enter
-2. Copy a shortcut to `eye_guard_2020.pyw` into that folder
+2. A folder opens — create a shortcut to `eye_guard_2020.pyw` inside it
 3. Done — it will start automatically every time you log in
 
-### Admin rights (optional)
-
-Running as administrator enables full keyboard/mouse blocking during breaks.
-Without admin, the black screen overlay still works — keyboard and mouse remain usable.
-
-To run as admin: right-click Command Prompt → "Run as administrator" → `python eye_guard_2020.pyw`
+To remove: open `shell:startup` again and delete the shortcut.
 
 ---
 
@@ -89,6 +74,15 @@ WORK_MINUTES   = 20   # minutes between breaks
 BREAK_SECONDS  = 20   # seconds of forced blackout
 SKIP_LOCK_SECS = 10   # seconds before skip button unlocks
 ```
+
+---
+
+## Admin rights (optional)
+
+Running as Administrator enables full keyboard/mouse blocking during breaks.
+Without admin, the black screen overlay still works — keyboard and mouse remain usable.
+
+To run as admin: right-click Command Prompt → "Run as administrator" → `python eye_guard_2020.pyw`
 
 ---
 
