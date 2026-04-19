@@ -1,0 +1,125 @@
+name: Build Installers
+
+on:
+  release:
+    types: [created]
+
+jobs:
+
+  # ── Windows Build ──────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller pywin32 pystray pillow
+
+      - name: Build exe with PyInstaller
+        run: |
+          cd windows
+          pyinstaller --onefile --windowed --name "EyeGuard" eye_guard_2020.pyw
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Create NSIS installer script
+        run: |
+          @"
+          !define APP_NAME "Eye Guard 20-20-20"
+          !define EXE_NAME "EyeGuard.exe"
+
+          Name "`${APP_NAME}"
+          OutFile "EyeGuard-Setup.exe"
+          InstallDir "`$PROGRAMFILES\EyeGuard"
+          RequestExecutionLevel admin
+
+          Page directory
+          Page instfiles
+
+          Section "Install"
+              SetOutPath "`$INSTDIR"
+              File "windows\dist\EyeGuard.exe"
+              CreateShortcut "`$DESKTOP\Eye Guard.lnk" "`$INSTDIR\`${EXE_NAME}"
+              CreateShortcut "`$SMPROGRAMS\Eye Guard.lnk" "`$INSTDIR\`${EXE_NAME}"
+
+              MessageBox MB_YESNO "Start Eye Guard automatically when Windows starts?" IDNO done
+                  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard" "`$INSTDIR\`${EXE_NAME}"
+              done:
+          SectionEnd
+
+          Section "Uninstall"
+              Delete "`$INSTDIR\`${EXE_NAME}"
+              Delete "`$DESKTOP\Eye Guard.lnk"
+              Delete "`$SMPROGRAMS\Eye Guard.lnk"
+              DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard"
+              RMDir "`$INSTDIR"
+          SectionEnd
+          "@ | Out-File -Encoding ASCII installer.nsi
+
+      - name: Compile NSIS installer
+        run: makensis installer.nsi
+
+      - name: Upload installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EyeGuard-Setup.exe
+
+  # ── macOS Build ────────────────────────────────────────────────────────────
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip3 install pyinstaller rumps pyobjc Pillow
+
+      - name: Build .app with PyInstaller
+        run: |
+          cd mac
+          pyinstaller --onefile --windowed --name "EyeGuard" eye_guard_mac.py
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "Eye Guard" \
+            --volicon "mac/dist/EyeGuard.app/Contents/Resources/icon-windowed.icns" \
+            --window-size 500 300 \
+            --icon-size 100 \
+            --icon "EyeGuard.app" 150 150 \
+            --app-drop-link 350 150 \
+            "EyeGuard.dmg" \
+            "mac/dist/" \
+          || \
+          create-dmg \
+            --volname "Eye Guard" \
+            --window-size 500 300 \
+            --icon-size 100 \
+            --icon "EyeGuard.app" 150 150 \
+            --app-drop-link 350 150 \
+            "EyeGuard.dmg" \
+            "mac/dist/"
+
+      - name: Upload DMG to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EyeGuard.dmg
