@@ -19,9 +19,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          pip install pyinstaller pywin32 pystray pillow
+      - name: Install Python dependencies
+        run: pip install pyinstaller pywin32 pystray pillow
 
       - name: Build exe with PyInstaller
         run: |
@@ -29,44 +28,49 @@ jobs:
           pyinstaller --onefile --windowed --name "EyeGuard" eye_guard_2020.pyw
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: choco install nsis -y --no-progress
 
       - name: Create NSIS installer script
+        shell: powershell
         run: |
-          @"
+          $nsi = @'
           !define APP_NAME "Eye Guard 20-20-20"
           !define EXE_NAME "EyeGuard.exe"
 
-          Name "`${APP_NAME}"
+          Name "${APP_NAME}"
           OutFile "EyeGuard-Setup.exe"
-          InstallDir "`$PROGRAMFILES\EyeGuard"
+          InstallDir "$PROGRAMFILES\EyeGuard"
           RequestExecutionLevel admin
 
           Page directory
           Page instfiles
 
           Section "Install"
-              SetOutPath "`$INSTDIR"
+              SetOutPath "$INSTDIR"
               File "20-20-20-application\Windows\dist\EyeGuard.exe"
-              CreateShortcut "`$DESKTOP\Eye Guard.lnk" "`$INSTDIR\`${EXE_NAME}"
-              CreateShortcut "`$SMPROGRAMS\Eye Guard.lnk" "`$INSTDIR\`${EXE_NAME}"
+              CreateShortcut "$DESKTOP\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
+              CreateShortcut "$SMPROGRAMS\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
 
               MessageBox MB_YESNO "Start Eye Guard automatically when Windows starts?" IDNO done
-                  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard" "`$INSTDIR\`${EXE_NAME}"
+                  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard" "$INSTDIR\${EXE_NAME}"
               done:
           SectionEnd
 
           Section "Uninstall"
-              Delete "`$INSTDIR\`${EXE_NAME}"
-              Delete "`$DESKTOP\Eye Guard.lnk"
-              Delete "`$SMPROGRAMS\Eye Guard.lnk"
+              Delete "$INSTDIR\${EXE_NAME}"
+              Delete "$DESKTOP\Eye Guard.lnk"
+              Delete "$SMPROGRAMS\Eye Guard.lnk"
               DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard"
-              RMDir "`$INSTDIR"
+              RMDir "$INSTDIR"
           SectionEnd
-          "@ | Out-File -Encoding ASCII installer.nsi
+          '@
+          $nsi | Out-File -Encoding ASCII installer.nsi
 
       - name: Compile NSIS installer
-        run: makensis installer.nsi
+        shell: powershell
+        run: |
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          & $makensis installer.nsi
 
       - name: Upload installer to Release
         uses: softprops/action-gh-release@v2
@@ -86,9 +90,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          pip3 install pyinstaller rumps pyobjc Pillow
+      - name: Install Python dependencies
+        run: pip3 install pyinstaller rumps pyobjc Pillow
 
       - name: Build .app with PyInstaller
         run: |
@@ -107,16 +110,7 @@ jobs:
             --icon "EyeGuard.app" 150 150 \
             --app-drop-link 350 150 \
             "EyeGuard.dmg" \
-            "20-20-20-application/Mac/dist/" \
-          || \
-          create-dmg \
-            --volname "Eye Guard" \
-            --window-size 500 300 \
-            --icon-size 100 \
-            --icon "EyeGuard.app" 150 150 \
-            --app-drop-link 350 150 \
-            "EyeGuard.dmg" \
-            "20-20-20-application/Mac/dist/"
+            "20-20-20-application/Mac/dist/" || true
 
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
