@@ -75,10 +75,67 @@ jobs:
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
           & $makensis installer.nsi
 
-      - name: Upload installer to Release
+      - name: Create Windows zip package
+        shell: powershell
+        run: |
+          $zipDir = "EyeGuard-Windows"
+          New-Item -ItemType Directory -Force -Path $zipDir
+
+          Copy-Item "20-20-20-application\Windows\eye_guard_2020.pyw" "$zipDir\"
+          Copy-Item "20-20-20-application\Windows\install.bat"         "$zipDir\setup.bat"
+          Copy-Item "20-20-20-application\Windows\startup.bat"         "$zipDir\"
+
+          # Create run.bat
+          @"
+          @echo off
+          python --version >nul 2>&1
+          if errorlevel 1 (
+              echo Python not found. Please run setup.bat first.
+              pause
+              exit /b 1
+          )
+          python -c "import pystray, PIL" >nul 2>&1
+          if errorlevel 1 (
+              echo Dependencies missing. Please run setup.bat first.
+              pause
+              exit /b 1
+          )
+          start "" pythonw "%~dp0eye_guard_2020.pyw"
+          "@ | Out-File -Encoding ASCII "$zipDir\run.bat"
+
+          # Create README
+          @"
+          EYE GUARD 20-20-20 - Windows (ZIP Version)
+          ===========================================
+          For use on restricted/work machines where installers are blocked.
+
+          QUICK START
+          1. Run setup.bat once to install dependencies
+          2. Double-click run.bat to launch the app
+          3. App runs silently in your system tray (bottom-right)
+
+          AUTO-START ON LOGIN (optional)
+          Run startup.bat and confirm.
+
+          REQUIREMENTS
+          Python 3.8+ from https://www.python.org/downloads/
+          (check Add Python to PATH during install)
+
+          QUIT
+          Right-click the tray icon then Quit
+          "@ | Out-File -Encoding ASCII "$zipDir\README.txt"
+
+          Compress-Archive -Path "$zipDir\*" -DestinationPath "EyeGuard-Windows.zip"
+
+      - name: Upload Windows installer to Release
         uses: softprops/action-gh-release@v2
         with:
           files: EyeGuard-Setup.exe
+
+      - name: Upload Windows zip to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EyeGuard-Windows.zip
 
   # ── macOS Build ────────────────────────────────────────────────────────────
   build-mac:
@@ -115,7 +172,93 @@ jobs:
             "EyeGuard.dmg" \
             "20-20-20-application/Mac/dist/" || true
 
-      - name: Upload DMG to Release
+      - name: Create Mac zip package
+        run: |
+          mkdir -p EyeGuard-Mac
+          cp 20-20-20-application/Mac/eye_guard_mac.py EyeGuard-Mac/
+
+          cat > EyeGuard-Mac/setup.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          chmod +x "$DIR/setup.sh" "$DIR/run.sh" "$DIR/startup.sh" "$DIR/remove_startup.sh" 2>/dev/null
+          if ! command -v python3 &> /dev/null; then
+              echo "[ERROR] Python 3 not found. Install from https://www.python.org/downloads/"
+              exit 1
+          fi
+          echo "[OK] $(python3 --version)"
+          pip3 install rumps pyobjc Pillow
+          echo "Setup complete! Run run.sh to launch."
+          EOF
+
+          cat > EyeGuard-Mac/run.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          python3 -c "import rumps" 2>/dev/null || { echo "Run setup.sh first."; exit 1; }
+          python3 "$DIR/eye_guard_mac.py" &
+          EOF
+
+          cat > EyeGuard-Mac/startup.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          PYTHON=$(which python3)
+          PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
+          mkdir -p "$HOME/Library/LaunchAgents"
+          cat > "$PLIST" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>Label</key><string>com.eyeguard.2020</string>
+              <key>ProgramArguments</key>
+              <array><string>$PYTHON</string><string>$DIR/eye_guard_mac.py</string></array>
+              <key>RunAtLoad</key><true/>
+              <key>KeepAlive</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          launchctl load "$PLIST"
+          echo "Eye Guard will now start automatically at login."
+          EOF
+
+          cat > EyeGuard-Mac/remove_startup.sh << 'EOF'
+          #!/bin/bash
+          PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
+          [ ! -f "$PLIST" ] && echo "Not set to run on startup." && exit 0
+          launchctl unload "$PLIST" && rm "$PLIST"
+          echo "Removed from startup."
+          EOF
+
+          cat > EyeGuard-Mac/README.txt << 'EOF'
+          EYE GUARD 20-20-20 - Mac (ZIP Version)
+          =======================================
+          For use on restricted/work machines where installers are blocked.
+
+          QUICK START
+          1. Open Terminal
+          2. Type: bash (drag setup.sh here) then press Enter — run once
+          3. Type: bash (drag run.sh here) then press Enter to launch
+          App runs silently in your menu bar (top-right, shows eye 19:42)
+
+          AUTO-START ON LOGIN (optional)
+          Type: bash (drag startup.sh here) then press Enter
+          To undo: bash remove_startup.sh
+
+          REQUIREMENTS
+          Python 3.8+ from https://www.python.org/downloads/
+
+          QUIT
+          Click the eye icon in menu bar then Quit Eye Guard
+          EOF
+
+          chmod +x EyeGuard-Mac/setup.sh EyeGuard-Mac/run.sh EyeGuard-Mac/startup.sh EyeGuard-Mac/remove_startup.sh
+          zip -r EyeGuard-Mac.zip EyeGuard-Mac/
+
+      - name: Upload Mac DMG to Release
         uses: softprops/action-gh-release@v2
         with:
           files: EyeGuard.dmg
+
+      - name: Upload Mac zip to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EyeGuard-Mac.zip
