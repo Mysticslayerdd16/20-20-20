@@ -179,6 +179,9 @@ jobs:
 
           cat > EyeGuard-Mac/setup.sh << 'EOF'
           #!/bin/bash
+          echo "========================================"
+          echo "  20-20-20 Eye Guard - Setup"
+          echo "========================================"
           DIR="$(cd "$(dirname "$0")" && pwd)"
           chmod +x "$DIR/setup.sh" "$DIR/run.sh" "$DIR/startup.sh" "$DIR/remove_startup.sh" 2>/dev/null
           if ! command -v python3 &> /dev/null; then
@@ -186,21 +189,45 @@ jobs:
               exit 1
           fi
           echo "[OK] $(python3 --version)"
-          pip3 install rumps pyobjc Pillow
-          echo "Setup complete! Run run.sh to launch."
+          echo "Creating virtual environment..."
+          python3 -m venv "$DIR/.venv"
+          echo "Installing dependencies..."
+          "$DIR/.venv/bin/pip" install --upgrade pip --quiet
+          "$DIR/.venv/bin/pip" install rumps pyobjc Pillow
+          if [ $? -ne 0 ]; then
+              echo "[ERROR] Could not install dependencies."
+              exit 1
+          fi
+          echo "========================================"
+          echo "  Setup complete! Run run.sh to launch."
+          echo "========================================"
           EOF
 
           cat > EyeGuard-Mac/run.sh << 'EOF'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          python3 -c "import rumps" 2>/dev/null || { echo "Run setup.sh first."; exit 1; }
-          python3 "$DIR/eye_guard_mac.py" &
+          VENV_PYTHON="$DIR/.venv/bin/python3"
+          if [ ! -f "$VENV_PYTHON" ]; then
+              osascript -e 'display alert "Setup required" message "Please run setup.sh first."' 2>/dev/null
+              echo "Please run setup.sh first."
+              exit 1
+          fi
+          "$VENV_PYTHON" "$DIR/eye_guard_mac.py" &
           EOF
 
           cat > EyeGuard-Mac/startup.sh << 'EOF'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          PYTHON=$(which python3)
+          VENV_PYTHON="$DIR/.venv/bin/python3"
+          if [ ! -f "$VENV_PYTHON" ]; then
+              echo "Please run setup.sh first."
+              exit 1
+          fi
+          read -p "Start Eye Guard automatically at login? (y/n): " confirm
+          if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+              echo "Cancelled."
+              exit 0
+          fi
           PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
           mkdir -p "$HOME/Library/LaunchAgents"
           cat > "$PLIST" << PLIST
@@ -210,14 +237,15 @@ jobs:
           <dict>
               <key>Label</key><string>com.eyeguard.2020</string>
               <key>ProgramArguments</key>
-              <array><string>$PYTHON</string><string>$DIR/eye_guard_mac.py</string></array>
+              <array><string>$VENV_PYTHON</string><string>$DIR/eye_guard_mac.py</string></array>
               <key>RunAtLoad</key><true/>
               <key>KeepAlive</key><false/>
           </dict>
           </plist>
           PLIST
           launchctl load "$PLIST"
-          echo "Eye Guard will now start automatically at login."
+          echo "Done! Eye Guard will start automatically at login."
+          echo "To undo: run remove_startup.sh"
           EOF
 
           cat > EyeGuard-Mac/remove_startup.sh << 'EOF'
