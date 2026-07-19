@@ -51,6 +51,7 @@ jobs:
           Section "Install"
               SetOutPath "$INSTDIR"
               File "20-20-20-application\Windows\dist\EyeGuard.exe"
+
               CreateShortcut "$DESKTOP\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
               CreateShortcut "$SMPROGRAMS\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
 
@@ -67,6 +68,7 @@ jobs:
               RMDir "$INSTDIR"
           SectionEnd
           '@
+
           $nsi | Out-File -Encoding ASCII installer.nsi
 
       - name: Compile NSIS installer
@@ -79,53 +81,19 @@ jobs:
         shell: powershell
         run: |
           $zipDir = "EyeGuard-Windows"
-          New-Item -ItemType Directory -Force -Path $zipDir
+
+          New-Item -ItemType Directory -Force -Path $zipDir | Out-Null
 
           Copy-Item "20-20-20-application\Windows\eye_guard_2020.pyw" "$zipDir\"
-          Copy-Item "20-20-20-application\Windows\install.bat"         "$zipDir\setup.bat"
-          Copy-Item "20-20-20-application\Windows\startup.bat"         "$zipDir\"
+          Copy-Item "20-20-20-application\Windows\install.bat" "$zipDir\"
+          Copy-Item "20-20-20-application\Windows\startup.bat" "$zipDir\"
+          Copy-Item "20-20-20-application\Windows\remove_startup.bat" "$zipDir\"
+          Copy-Item "20-20-20-application\README.md" "$zipDir\README.md"
 
-          # Create run.bat
-          @"
-          @echo off
-          python --version >nul 2>&1
-          if errorlevel 1 (
-              echo Python not found. Please run setup.bat first.
-              pause
-              exit /b 1
-          )
-          python -c "import pystray, PIL" >nul 2>&1
-          if errorlevel 1 (
-              echo Dependencies missing. Please run setup.bat first.
-              pause
-              exit /b 1
-          )
-          start "" pythonw "%~dp0eye_guard_2020.pyw"
-          "@ | Out-File -Encoding ASCII "$zipDir\run.bat"
-
-          # Create README
-          @"
-          EYE GUARD 20-20-20 - Windows (ZIP Version)
-          ===========================================
-          For use on restricted/work machines where installers are blocked.
-
-          QUICK START
-          1. Run setup.bat once to install dependencies
-          2. Double-click run.bat to launch the app
-          3. App runs silently in your system tray (bottom-right)
-
-          AUTO-START ON LOGIN (optional)
-          Run startup.bat and confirm.
-
-          REQUIREMENTS
-          Python 3.8+ from https://www.python.org/downloads/
-          (check Add Python to PATH during install)
-
-          QUIT
-          Right-click the tray icon then Quit
-          "@ | Out-File -Encoding ASCII "$zipDir\README.txt"
-
-          Compress-Archive -Path "$zipDir\*" -DestinationPath "EyeGuard-Windows.zip"
+          Compress-Archive `
+            -Path "$zipDir\*" `
+            -DestinationPath "EyeGuard-Windows.zip" `
+            -Force
 
       - name: Upload Windows installer to Release
         uses: softprops/action-gh-release@v2
@@ -175,110 +143,141 @@ jobs:
       - name: Create Mac zip package
         run: |
           mkdir -p EyeGuard-Mac
+
           cp 20-20-20-application/Mac/eye_guard_mac.py EyeGuard-Mac/
+          cp 20-20-20-application/README.md EyeGuard-Mac/README.md
 
           cat > EyeGuard-Mac/setup.sh << 'EOF'
           #!/bin/bash
+
           echo "========================================"
           echo "  20-20-20 Eye Guard - Setup"
           echo "========================================"
+
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          chmod +x "$DIR/setup.sh" "$DIR/run.sh" "$DIR/startup.sh" "$DIR/remove_startup.sh" 2>/dev/null
+
+          chmod +x \
+            "$DIR/setup.sh" \
+            "$DIR/run.sh" \
+            "$DIR/startup.sh" \
+            "$DIR/remove_startup.sh" 2>/dev/null
+
           if ! command -v python3 &> /dev/null; then
-              echo "[ERROR] Python 3 not found. Install from https://www.python.org/downloads/"
+              echo "[ERROR] Python 3 not found."
+              echo "Install it from https://www.python.org/downloads/"
               exit 1
           fi
+
           echo "[OK] $(python3 --version)"
           echo "Creating virtual environment..."
+
           python3 -m venv "$DIR/.venv"
+
           echo "Installing dependencies..."
+
           "$DIR/.venv/bin/pip" install --upgrade pip --quiet
           "$DIR/.venv/bin/pip" install rumps pyobjc Pillow
+
           if [ $? -ne 0 ]; then
               echo "[ERROR] Could not install dependencies."
               exit 1
           fi
+
           echo "========================================"
-          echo "  Setup complete! Run run.sh to launch."
+          echo "  Setup complete!"
+          echo "  Run run.sh to launch Eye Guard."
           echo "========================================"
           EOF
 
           cat > EyeGuard-Mac/run.sh << 'EOF'
           #!/bin/bash
+
           DIR="$(cd "$(dirname "$0")" && pwd)"
           VENV_PYTHON="$DIR/.venv/bin/python3"
+
           if [ ! -f "$VENV_PYTHON" ]; then
               osascript -e 'display alert "Setup required" message "Please run setup.sh first."' 2>/dev/null
               echo "Please run setup.sh first."
               exit 1
           fi
+
           "$VENV_PYTHON" "$DIR/eye_guard_mac.py" &
           EOF
 
           cat > EyeGuard-Mac/startup.sh << 'EOF'
           #!/bin/bash
+
           DIR="$(cd "$(dirname "$0")" && pwd)"
           VENV_PYTHON="$DIR/.venv/bin/python3"
+
           if [ ! -f "$VENV_PYTHON" ]; then
               echo "Please run setup.sh first."
               exit 1
           fi
+
           read -p "Start Eye Guard automatically at login? (y/n): " confirm
+
           if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
               echo "Cancelled."
               exit 0
           fi
+
           PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
+
           mkdir -p "$HOME/Library/LaunchAgents"
+
           cat > "$PLIST" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
           <plist version="1.0">
           <dict>
-              <key>Label</key><string>com.eyeguard.2020</string>
+              <key>Label</key>
+              <string>com.eyeguard.2020</string>
+
               <key>ProgramArguments</key>
-              <array><string>$VENV_PYTHON</string><string>$DIR/eye_guard_mac.py</string></array>
-              <key>RunAtLoad</key><true/>
-              <key>KeepAlive</key><false/>
+              <array>
+                  <string>$VENV_PYTHON</string>
+                  <string>$DIR/eye_guard_mac.py</string>
+              </array>
+
+              <key>RunAtLoad</key>
+              <true/>
+
+              <key>KeepAlive</key>
+              <false/>
           </dict>
           </plist>
           PLIST
+
           launchctl load "$PLIST"
+
           echo "Done! Eye Guard will start automatically at login."
-          echo "To undo: run remove_startup.sh"
+          echo "To undo this, run remove_startup.sh."
           EOF
 
           cat > EyeGuard-Mac/remove_startup.sh << 'EOF'
           #!/bin/bash
+
           PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
-          [ ! -f "$PLIST" ] && echo "Not set to run on startup." && exit 0
-          launchctl unload "$PLIST" && rm "$PLIST"
-          echo "Removed from startup."
+
+          if [ ! -f "$PLIST" ]; then
+              echo "Eye Guard is not configured to run at startup."
+              exit 0
+          fi
+
+          launchctl unload "$PLIST"
+          rm "$PLIST"
+
+          echo "Eye Guard has been removed from startup."
           EOF
 
-          cat > EyeGuard-Mac/README.txt << 'EOF'
-          EYE GUARD 20-20-20 - Mac (ZIP Version)
-          =======================================
-          For use on restricted/work machines where installers are blocked.
+          chmod +x \
+            EyeGuard-Mac/setup.sh \
+            EyeGuard-Mac/run.sh \
+            EyeGuard-Mac/startup.sh \
+            EyeGuard-Mac/remove_startup.sh
 
-          QUICK START
-          1. Open Terminal
-          2. Type: bash (drag setup.sh here) then press Enter — run once
-          3. Type: bash (drag run.sh here) then press Enter to launch
-          App runs silently in your menu bar (top-right, shows eye 19:42)
-
-          AUTO-START ON LOGIN (optional)
-          Type: bash (drag startup.sh here) then press Enter
-          To undo: bash remove_startup.sh
-
-          REQUIREMENTS
-          Python 3.8+ from https://www.python.org/downloads/
-
-          QUIT
-          Click the eye icon in menu bar then Quit Eye Guard
-          EOF
-
-          chmod +x EyeGuard-Mac/setup.sh EyeGuard-Mac/run.sh EyeGuard-Mac/startup.sh EyeGuard-Mac/remove_startup.sh
           zip -r EyeGuard-Mac.zip EyeGuard-Mac/
 
       - name: Upload Mac DMG to Release
