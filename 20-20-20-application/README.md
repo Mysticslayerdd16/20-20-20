@@ -1,104 +1,213 @@
-# 👁️ 20·20·20 Eye Guard
+# 👁️ Eye Guard
 
-A lightweight native app that enforces the **20-20-20 rule** to reduce digital eye strain.
+A lightweight native Windows application that helps reduce digital eye strain by enforcing periodic screen breaks based on the **20-20-20 rule**.
 
-> Every **20 minutes**, look at something **20 feet away** for **20 seconds**.
-
-Supports **Windows** and **macOS**.
+Choose your preferred work interval (1–180 minutes), and Eye Guard automatically blacks out all connected monitors for a mandatory 20-second break—helping you build healthier screen habits without relying on self-discipline.
 
 ---
 
-## What it does
+## Features
 
-- Counts down 20 minutes silently in the background
-- **Blacks out all monitors** when it's time for a break — no title bar, no close button
-- Shows a 20-second countdown on the black screen
-- Skip button is **locked for 10 seconds** so you can't dismiss it reflexively
-- Tracks your breaks, skips, and streak
-- Runs silently in the **system tray** (Windows) or **menu bar** (Mac)
-- No internet connection, no data collection, nothing stored to disk
-
----
-
-## Requirements
-
-- Python 3.8+ — download from [python.org](https://www.python.org/downloads/)
+- ✅ Configurable work interval (1–180 minutes)
+- ✅ Mandatory 20-second eye breaks
+- ✅ Complete multi-monitor blackout
+- ✅ Native Windows application
+- ✅ System tray support
+- ✅ Pause and resume timer
+- ✅ One-click timer reset
+- ✅ Skip option with delayed unlock
+- ✅ Session statistics and streak tracking
+- ✅ Automatic startup with Windows
+- ✅ Lightweight and distraction-free interface
 
 ---
 
-## Windows
+## Why Eye Guard?
 
-### Files
-```
-windows/
-├── eye_guard_2020.pyw      ← the app (double-click to run)
-├── install.bat             ← installs dependencies
-├── startup.bat             ← adds to Windows startup
-└── remove_startup.bat      ← removes from startup
-```
+Most reminder applications can simply be dismissed or ignored.
 
-### Setup
-1. Install [Python](https://www.python.org/downloads/) — check **"Add Python to PATH"**
-2. Double-click **`install.bat`**
-3. Double-click **`eye_guard_2020.pyw`** to launch
+Eye Guard takes a different approach.
 
-The app runs silently — right-click the **system tray icon** (bottom-right) to quit.
-
-### Run on startup (optional)
-- **One-click:** Double-click `startup.bat` and confirm
-- **Manual:** Press `Win+R` → type `shell:startup` → paste a shortcut to `eye_guard_2020.pyw`
-
-To undo: run `remove_startup.bat`
+Once a break begins, all connected monitors are covered with an unescapable blackout overlay for 20 seconds, encouraging you to actually look away from your screen and give your eyes a chance to recover.
 
 ---
 
-## macOS
+## How it works
 
-### Files
-```
-mac/
-├── eye_guard_mac.py        ← the app
-├── install_mac.sh          ← installs dependencies
-├── startup_mac.sh          ← adds to Mac startup (launchd)
-└── remove_startup_mac.sh   ← removes from startup
-```
-
-### Setup
-1. Install [Python](https://www.python.org/downloads/)
-2. Open Terminal in the `mac/` folder and run:
-   ```bash
-   chmod +x install_mac.sh && ./install_mac.sh
-   ```
-3. Run the app:
-   ```bash
-   python3 eye_guard_mac.py
-   ```
-
-The app runs silently in the **menu bar** (top-right, shows `👁 19:42`).
-
-### Run on startup (optional)
-- **One-click:**
-  ```bash
-  chmod +x startup_mac.sh && ./startup_mac.sh
-  ```
-- **Manual:** Add `python3 /path/to/eye_guard_mac.py` to your Login Items in System Settings
-
-To undo: run `./remove_startup_mac.sh`
+1. Launch Eye Guard.
+2. Select your preferred work interval (between **1 and 180 minutes**).
+3. Click **Apply**.
+4. Continue working normally.
+5. At the end of every interval, all monitors are blacked out for 20 seconds.
+6. Look at an object at least 20 feet away until the countdown finishes.
 
 ---
 
-## Configuration
+## Main Interface
 
-Open the app file in any text editor and change these lines near the top:
+The application displays:
 
-```python
-WORK_MINUTES   = 20   # minutes between breaks
-BREAK_SECONDS  = 20   # seconds of forced blackout
-SKIP_LOCK_SECS = 10   # seconds before skip button unlocks
+- Remaining time until the next break
+- Configurable work interval
+- Progress indicator
+- Break statistics
+- Current streak
+- Session log
+- Pause and reset controls
+
+---
+
+## Break Screen
+
+During a break:
+
+- Every connected monitor is covered.
+- A countdown timer is displayed.
+- The application reminds you to look approximately 20 feet away.
+- Skip is disabled for the first few seconds to discourage immediately bypassing the break.
+
+---
+
+## Installation
+
+### Option 1 — Windows Package (Recommended)
+
+Download the latest Windows release from the **Releases** page.
+
+Extract the ZIP and run:
+
 ```
+install.bat
+```
+
+To enable automatic startup with Windows, run:
+
+```
+startup.bat
+```
+
+---
+
+### Option 2 — Run from Source
+
+Requirements
+
+```
+Python 3.11+
+```
+
+Install dependencies
+
+```bash
+pip install pywin32 pystray pillow
+```
+
+Run
+
+```bash
+pythonw eye_guard_2020.pyw
+```
+
+---
+
+## Automatic Startup
+
+Eye Guard can automatically start every time you sign in to Windows.
+
+Simply run:
+
+```
+startup.bat
+```
+
+or manually create a shortcut inside:
+
+```
+shell:startup
+```
+
+---
+
+## Session Statistics
+
+Eye Guard tracks:
+
+- Breaks completed
+- Breaks skipped
+- Current streak
+- Session history
+
+These statistics reset when the application is closed.
+
+---
+
+## Built With
+
+- Python
+- Tkinter
+- PyStray
+- Pillow
+- Win32 API
+
+---
+
+## Roadmap
+
+Future enhancements under consideration:
+
+- Daily and weekly statistics
+- Configurable break duration
+- Dark and light themes
+- Productivity insights
+- Auto-update support
+- Standalone executable (no Python installation required)
+
+---
+
+## Version History
+
+### v1.0.7
+
+#### New
+
+- Configurable work interval (1–180 minutes)
+- Interval can be changed without restarting the application
+
+#### Improvements
+
+- Improved Windows startup reliability
+- Improved timer handling
+- Improved system tray behaviour
+- Better progress bar calculation
+
+#### Fixes
+
+- Fixed timer reset after changing interval
+- Fixed duplicate timer loop after pause/resume
+- Various stability improvements
+
+---
+
+## Contributing
+
+Suggestions, bug reports and feature requests are always welcome.
+
+Please open an issue or submit a pull request.
 
 ---
 
 ## License
 
-MIT — free to use, modify, and share. See [LICENSE](LICENSE).
+This project is released under the MIT License.
+
+---
+
+## 20-20-20 Rule
+
+Every 20 minutes:
+
+👀 Look at something at least **20 feet (6 metres)** away
+
+⏱️ For **20 seconds**
+
+A simple habit that can help reduce digital eye strain during prolonged screen use.
