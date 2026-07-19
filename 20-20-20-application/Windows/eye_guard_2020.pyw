@@ -1,7 +1,7 @@
 """
 20·20·20 Eye Guard — Windows Native App
 ========================================
-Every 20 minutes, blacks out ALL monitors for 20 seconds.
+After your chosen work interval, blacks out ALL monitors for 20 seconds.
 The overlay is inescapable (Alt+F4, Alt+Tab, Win key all blocked during break).
 
 Requirements:
@@ -15,6 +15,7 @@ import tkinter as tk
 import threading
 import time
 import ctypes
+from ctypes import wintypes
 import sys
 import os
 import winsound
@@ -31,6 +32,7 @@ except ImportError:
 WORK_MINUTES   = 20          # minutes between breaks
 BREAK_SECONDS  = 20          # seconds of forced blackout
 SKIP_LOCK_SECS = 10          # seconds before skip button unlocks
+STARTUP_DELAY_MS = 10000      # wait for Windows desktop/system tray after login
 
 # ── Win32 helpers ────────────────────────────────────────────────────────────
 user32   = ctypes.windll.user32
@@ -46,7 +48,7 @@ def get_all_monitors():
     MONITORENUMPROC = ctypes.WINFUNCTYPE(
         ctypes.c_int,
         ctypes.c_ulong, ctypes.c_ulong,
-        ctypes.POINTER(ctypes.wintypes.RECT),
+        ctypes.POINTER(wintypes.RECT),
         ctypes.c_double
     )
     user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(cb), 0)
@@ -98,22 +100,42 @@ class EyeGuard:
         self.root.attributes("-toolwindow", True)   # hide from Alt+Tab
 
         # Center small control window
-        self.root.geometry("380x420")
-        self._center_window(self.root, 380, 420)
+        self.root.geometry("380x490")
+        self._center_window(self.root, 380, 490)
 
-        self.work_left   = WORK_MINUTES * 60
+        self.work_minutes = WORK_MINUTES
+        self.work_left    = self.work_minutes * 60
         self.paused      = False
         self.on_break    = False
         self.running     = True
         self.overlay_wins = []
 
         self._build_ui()
-        self._tick_work()
+        self._update_work_display()
+
+        # Start hidden, then restore after Windows has finished loading the desktop.
+        # This avoids the app becoming an invisible background process at sign-in.
+        self.root.withdraw()
 
         if TRAY_AVAILABLE:
             self._start_tray()
 
+        self.root.after(STARTUP_DELAY_MS, self._finish_startup)
         self.root.mainloop()
+
+    def _finish_startup(self):
+        """Show the control window after Windows Explorer and the tray are ready."""
+        if not self.running:
+            return
+
+        self.root.deiconify()
+        self.root.update_idletasks()
+        self._center_window(self.root, 380, 490)
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.focus_force()
+        self.root.after(750, lambda: self.root.attributes("-topmost", False))
+        self._tick_work()
 
     # ── UI ───────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -130,7 +152,7 @@ class EyeGuard:
                  bg=BG, fg=MUT, font=("Courier New", 9)).pack(pady=(20, 4))
 
         # Big countdown
-        self.time_var = tk.StringVar(value="20:00")
+        self.time_var = tk.StringVar(value=f"{self.work_minutes:02d}:00")
         tk.Label(self.root, textvariable=self.time_var,
                  bg=BG, fg=ACC, font=("Courier New", 58, "bold")).pack(pady=(8, 0))
 
@@ -143,6 +165,45 @@ class EyeGuard:
         self.canvas.pack(pady=16)
         self.bar_bg  = self.canvas.create_rectangle(0, 0, 320, 6, fill="#2a2f2d", outline="")
         self.bar_fg  = self.canvas.create_rectangle(0, 0, 320, 6, fill=ACC,       outline="")
+
+        # Work interval selector
+        interval_frame = tk.Frame(self.root, bg=BG)
+        interval_frame.pack(pady=(0, 10))
+
+        tk.Label(
+            interval_frame, text="BREAK EVERY",
+            bg=BG, fg=MUT, font=("Courier New", 9)
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.interval_var = tk.StringVar(value=str(self.work_minutes))
+        self.interval_spinbox = tk.Spinbox(
+            interval_frame,
+            from_=1, to=180, increment=1,
+            textvariable=self.interval_var,
+            width=5, justify=tk.CENTER,
+            bg=SURF, fg=TXT,
+            buttonbackground=SURF,
+            insertbackground=TXT,
+            relief=tk.FLAT,
+            font=("Courier New", 10),
+            validate="key",
+            validatecommand=(self.root.register(self._validate_interval), "%P")
+        )
+        self.interval_spinbox.pack(side=tk.LEFT)
+
+        tk.Label(
+            interval_frame, text="MIN",
+            bg=BG, fg=MUT, font=("Courier New", 9)
+        ).pack(side=tk.LEFT, padx=(6, 8))
+
+        tk.Button(
+            interval_frame, text="APPLY",
+            command=self.apply_interval,
+            bg=SURF, fg=ACC,
+            activebackground=ACC, activeforeground="#0a1a10",
+            font=("Courier New", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4, cursor="hand2"
+        ).pack(side=tk.LEFT)
 
         # Stats row
         stats_frame = tk.Frame(self.root, bg=BG)
@@ -216,7 +277,9 @@ class EyeGuard:
         s = self.work_left % 60
         self.time_var.set(f"{m:02d}:{s:02d}")
 
-        pct  = self.work_left / (WORK_MINUTES * 60)
+        total_seconds = self.work_minutes * 60
+        pct = self.work_left / total_seconds if total_seconds > 0 else 0
+        pct = max(0, min(1, pct))
         fill = int(320 * pct)
         color = "#3dff8f" if pct > 0.25 else ("#ffb830" if pct > 0.1 else "#ff4f4f")
         self.canvas.coords(self.bar_fg, 0, 0, fill, 6)
@@ -325,7 +388,7 @@ class EyeGuard:
             win.destroy()
         self.overlay_wins = []
         self.on_break     = False
-        self.work_left    = WORK_MINUTES * 60
+        self.work_left    = self.work_minutes * 60
 
         stats["breaks_done"]  += 1
         stats["streak"]       += 1
@@ -341,7 +404,7 @@ class EyeGuard:
             win.destroy()
         self.overlay_wins = []
         self.on_break     = False
-        self.work_left    = WORK_MINUTES * 60
+        self.work_left    = self.work_minutes * 60
 
         stats["breaks_skipped"] += 1
         stats["streak"]          = 0
@@ -351,18 +414,49 @@ class EyeGuard:
         self._tick_work()
 
     # ── Controls ─────────────────────────────────────────────────────────────
+    def _validate_interval(self, value):
+        """Allow an empty field while editing, or a whole number up to 180."""
+        if value == "":
+            return True
+        return value.isdigit() and 1 <= int(value) <= 180
+
+    def apply_interval(self):
+        """Apply the selected work interval and restart the countdown."""
+        if self.on_break:
+            return
+
+        try:
+            selected_minutes = int(self.interval_var.get())
+        except ValueError:
+            self.interval_var.set(str(self.work_minutes))
+            return
+
+        if not 1 <= selected_minutes <= 180:
+            self.interval_var.set(str(self.work_minutes))
+            return
+
+        self.work_minutes = selected_minutes
+        self.work_left = self.work_minutes * 60
+        self._update_work_display()
+
+        if TRAY_AVAILABLE:
+            try:
+                self.tray_icon.title = (
+                    f"Eye Guard — break every {self.work_minutes} minutes"
+                )
+            except Exception:
+                pass
+
     def toggle_pause(self):
         if self.on_break:
             return
         self.paused = not self.paused
         self.pause_btn.config(text="RESUME" if self.paused else "PAUSE")
-        if not self.paused:
-            self._tick_work()
 
     def reset_timer(self):
         if self.on_break:
             return
-        self.work_left = WORK_MINUTES * 60
+        self.work_left = self.work_minutes * 60
         self._update_work_display()
 
     def _refresh_stats(self):
@@ -383,13 +477,23 @@ class EyeGuard:
             pystray.MenuItem("Show", self._show_window, default=True),
             pystray.MenuItem("Quit", self._quit_app),
         )
-        self.tray_icon = pystray.Icon("EyeGuard", img, "20·20·20 Eye Guard", menu)
+        self.tray_icon = pystray.Icon(
+            "EyeGuard", img,
+            f"Eye Guard — break every {self.work_minutes} minutes",
+            menu
+        )
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
-    def _show_window(self):
-        self.root.after(0, self.root.deiconify)
+    def _show_window(self, icon=None, item=None):
+        def restore():
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
+            self.root.after(500, lambda: self.root.attributes("-topmost", False))
+        self.root.after(0, restore)
 
-    def _quit_app(self):
+    def _quit_app(self, icon=None, item=None):
         self.running = False
         block_input(False)
         if TRAY_AVAILABLE:
@@ -400,7 +504,10 @@ class EyeGuard:
         self.root.after(0, self.root.destroy)
 
     def on_close(self):
-        self.root.iconify()  # minimize to tray instead of quitting
+        if TRAY_AVAILABLE:
+            self.root.withdraw()  # hide to tray instead of leaving an invisible taskbar window
+        else:
+            self._quit_app()
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
