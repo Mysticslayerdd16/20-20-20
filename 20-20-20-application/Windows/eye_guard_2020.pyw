@@ -2,7 +2,7 @@
 20·20·20 Eye Guard — Windows Native App
 ========================================
 After your chosen work interval, blacks out ALL monitors for 20 seconds.
-The overlay is inescapable (Alt+F4, Alt+Tab, Win key all blocked during break).
+All connected monitors receive synchronized blackout overlays.
 
 Requirements:
     pip install pywin32 pystray pillow
@@ -19,6 +19,7 @@ from ctypes import wintypes
 import sys
 import os
 import winsound
+import atexit
 from datetime import datetime
 
 try:
@@ -35,6 +36,15 @@ SKIP_LOCK_SECS = 10          # seconds before skip button unlocks
 STARTUP_DELAY_MS = 10000      # wait for Windows desktop/system tray after login
 
 # ── Win32 helpers ────────────────────────────────────────────────────────────
+# Opt into per-monitor DPI awareness before creating any Tk windows.
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except (AttributeError, OSError):
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+
 user32   = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
@@ -47,24 +57,19 @@ def get_all_monitors():
         return 1
     MONITORENUMPROC = ctypes.WINFUNCTYPE(
         ctypes.c_int,
-        ctypes.c_ulong, ctypes.c_ulong,
+        wintypes.HMONITOR, wintypes.HDC,
         ctypes.POINTER(wintypes.RECT),
-        ctypes.c_double
+        wintypes.LPARAM
     )
-    user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(cb), 0)
+    callback = MONITORENUMPROC(cb)
+    user32.EnumDisplayMonitors(None, None, callback, 0)
     if not monitors:
         sw = user32.GetSystemMetrics(0)
         sh = user32.GetSystemMetrics(1)
         monitors = [(0, 0, sw, sh)]
     return monitors
 
-def block_input(block: bool):
-    """Block all keyboard/mouse input (requires admin, gracefully skips if not)."""
-    try:
-        user32.BlockInput(block)
-    except Exception:
-        pass
-
+# Never globally block input: users must retain an emergency escape route.
 def beep_alert():
     """Rising 3-tone alert."""
     for freq, dur in [(523, 150), (659, 150), (784, 250)]:
@@ -109,6 +114,7 @@ class EyeGuard:
         self.on_break    = False
         self.running     = True
         self.overlay_wins = []
+        self._monitor_signature = ()
 
         self._build_ui()
         self._update_work_display()
@@ -291,12 +297,15 @@ class EyeGuard:
         threading.Thread(target=beep_alert, daemon=True).start()
         self.root.after(0, self._show_overlays)
 
-    def _show_overlays(self):
+    def _show_overlays(self, restart_timer=True):
         monitors = get_all_monitors()
+        self._monitor_signature = tuple(monitors)
         self.overlay_wins = []
-        self._break_left     = BREAK_SECONDS
-        self._skip_lock_left = SKIP_LOCK_SECS
-        self._skipped        = False
+        if restart_timer:
+            self._break_left = BREAK_SECONDS
+            self._skip_lock_left = SKIP_LOCK_SECS
+            self._skipped = False
+        self.skip_buttons = []
 
         for i, (mx, my, mw, mh) in enumerate(monitors):
             win = tk.Toplevel(self.root)
@@ -304,7 +313,7 @@ class EyeGuard:
             win.overrideredirect(True)          # no title bar (mutually exclusive with -fullscreen)
             win.attributes("-topmost", True)    # always on top
             win.attributes("-toolwindow", True)   # hide from Alt+Tab
-            win.geometry(f"{mw}x{mh}+{mx}+{my}")  # manually cover the full monitor
+            win.geometry(f"{mw}x{mh}{mx:+d}{my:+d}")  # manually cover the full monitor
             win.focus_force()
 
             # Block Alt+F4, Alt+Tab, Win key
@@ -314,14 +323,13 @@ class EyeGuard:
             win.bind("<Super_R>",     lambda e: "break")
             win.bind("<Escape>",      lambda e: "break")
 
-            if i == 0:
-                # Main overlay — shown on the primary monitor
-                self._build_overlay_ui(win, mw, mh)
+            # Every display shows the same countdown and an accessible skip button.
+            self._build_overlay_ui(win, mw, mh)
 
             self.overlay_wins.append(win)
 
-        block_input(True)
-        self._tick_break()
+        if restart_timer:
+            self._tick_break()
 
     def _build_overlay_ui(self, win, w, h):
         ACC  = "#3dff8f"
@@ -337,7 +345,8 @@ class EyeGuard:
                  bg="black", fg=MUT,
                  font=MONO, justify=tk.CENTER).place(relx=0.5, rely=0.42, anchor="center")
 
-        self.break_count_var = tk.StringVar(value=str(BREAK_SECONDS))
+        if not hasattr(self, "break_count_var"):
+            self.break_count_var = tk.StringVar(value=str(BREAK_SECONDS))
         tk.Label(win, textvariable=self.break_count_var,
                  bg="black", fg=ACC,
                  font=("Courier New", 80, "bold")).place(relx=0.5, rely=0.6, anchor="center")
@@ -346,12 +355,13 @@ class EyeGuard:
                  bg="black", fg=MUT,
                  font=MONO).place(relx=0.5, rely=0.72, anchor="center")
 
-        self.skip_note_var = tk.StringVar(value=f"skip unlocks in {SKIP_LOCK_SECS}s")
+        if not hasattr(self, "skip_note_var"):
+            self.skip_note_var = tk.StringVar(value=f"skip unlocks in {SKIP_LOCK_SECS}s")
         tk.Label(win, textvariable=self.skip_note_var,
                  bg="black", fg="#333",
                  font=("Courier New", 9)).place(relx=0.5, rely=0.82, anchor="center")
 
-        self.skip_btn = tk.Button(
+        skip_btn = tk.Button(
             win, text="SKIP BREAK (not recommended)",
             command=self._skip_break,
             bg="black", fg="#3a1515",
@@ -359,17 +369,25 @@ class EyeGuard:
             relief=tk.FLAT, cursor="hand2",
             state=tk.DISABLED
         )
-        self.skip_btn.place(relx=0.5, rely=0.86, anchor="center")
+        skip_btn.place(relx=0.5, rely=0.86, anchor="center")
+        self.skip_buttons.append(skip_btn)
 
     def _tick_break(self):
-        if self._skipped:
+        if self._skipped or not self.on_break:
             return
+        try:
+            current = tuple(get_all_monitors())
+            if current != self._monitor_signature:
+                self._rebuild_overlays()
+        except Exception as exc:
+            print(f"[EyeGuard] Display refresh failed: {exc}")
 
         if self._skip_lock_left > 0:
             self._skip_lock_left -= 1
             if self._skip_lock_left == 0:
                 self.skip_note_var.set("you can skip now (please don't)")
-                self.skip_btn.config(state=tk.NORMAL, fg="#7a2020")
+                for btn in self.skip_buttons:
+                    btn.config(state=tk.NORMAL, fg="#7a2020")
             else:
                 self.skip_note_var.set(f"skip unlocks in {self._skip_lock_left}s")
 
@@ -381,12 +399,26 @@ class EyeGuard:
         self._break_left -= 1
         self.root.after(1000, self._tick_break)
 
+    def _rebuild_overlays(self):
+        # Preserve countdown and skip-lock state across hot-plug events.
+        left, lock = self._break_left, self._skip_lock_left
+        for win in self.overlay_wins:
+            win.destroy()
+        self.overlay_wins = []
+        self._show_overlays(restart_timer=False)
+        self._break_left, self._skip_lock_left = left, lock
+        self.break_count_var.set(str(left))
+        self.skip_note_var.set("you can skip now" if lock == 0 else f"skip unlocks in {lock}s")
+        if lock == 0:
+            for btn in self.skip_buttons:
+                btn.config(state=tk.NORMAL, fg="#7a2020")
+
     def _complete_break(self):
-        block_input(False)
         threading.Thread(target=beep_done, daemon=True).start()
         for win in self.overlay_wins:
             win.destroy()
         self.overlay_wins = []
+        self.skip_buttons = []
         self.on_break     = False
         self.work_left    = self.work_minutes * 60
 
@@ -399,10 +431,10 @@ class EyeGuard:
 
     def _skip_break(self):
         self._skipped = True
-        block_input(False)
         for win in self.overlay_wins:
             win.destroy()
         self.overlay_wins = []
+        self.skip_buttons = []
         self.on_break     = False
         self.work_left    = self.work_minutes * 60
 
@@ -495,7 +527,6 @@ class EyeGuard:
 
     def _quit_app(self, icon=None, item=None):
         self.running = False
-        block_input(False)
         if TRAY_AVAILABLE:
             try:
                 self.tray_icon.stop()
@@ -512,8 +543,4 @@ class EyeGuard:
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Request admin rights for BlockInput (soft requirement — app works without it)
-    if sys.platform == "win32" and not ctypes.windll.shell32.IsUserAnAdmin():
-        print("[EyeGuard] Tip: run as Administrator for full input blocking during breaks.")
-
     EyeGuard()

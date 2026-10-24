@@ -1,34 +1,11 @@
 #!/bin/bash
-echo "========================================"
-echo "  20-20-20 Eye Guard - Mac Installer"
-echo "========================================"
-echo ""
-
-# Check Python
-if ! command -v python3 &> /dev/null; then
-    echo "[ERROR] Python 3 not found."
-    echo "Install it from https://www.python.org/downloads/ or via Homebrew:"
-    echo "  brew install python"
-    exit 1
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Python 3 is required. Install it and rerun this script."; exit 1
 fi
-
-echo "[OK] Python found: $(python3 --version)"
-echo ""
-echo "Installing dependencies..."
-echo ""
-
-pip3 install rumps pyobjc Pillow
-
-if [ $? -ne 0 ]; then
-    echo ""
-    echo "[ERROR] Installation failed. Try:"
-    echo "  sudo pip3 install rumps pyobjc Pillow"
-    exit 1
-fi
-
-echo ""
-echo "========================================"
-echo "  Installation complete!"
-echo "  Run the app with:"
-echo "    python3 eye_guard_mac.py"
-echo "========================================"
+python3 -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ required"'
+python3 -m venv "$DIR/.venv"
+"$DIR/.venv/bin/python3" -m pip install --upgrade pip rumps pyobjc Pillow
+"$DIR/.venv/bin/python3" -c 'import rumps, Cocoa, Quartz, PIL'
+echo "Setup complete. Run ./run.sh"

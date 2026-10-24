@@ -1,291 +1,86 @@
-name: Build Installers
-
+name: Build EyeGuard Release
 on:
-  release:
-    types: [created]
-
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
 permissions:
   contents: write
-
 jobs:
-
-  # ── Windows Build ──────────────────────────────────────────────────────────
-  build-windows:
+  windows:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: pip install pyinstaller pywin32 pystray pillow
-
-      - name: Build exe with PyInstaller
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install pyinstaller pywin32 pystray pillow
+      - name: Build executable
+        shell: pwsh
         run: |
-          cd "20-20-20-application/Windows"
-          pyinstaller --onefile --windowed --name "EyeGuard" eye_guard_2020.pyw
-
+          cd 20-20-20-application/Windows
+          pyinstaller --clean --noconfirm --onefile --windowed --name EyeGuard eye_guard_2020.pyw
       - name: Install NSIS
         run: choco install nsis -y --no-progress
-
-      - name: Create NSIS installer script
-        shell: powershell
+      - name: Create installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi'
+      - name: Package source ZIP
+        shell: pwsh
         run: |
-          $nsi = @'
-          !define APP_NAME "Eye Guard 20-20-20"
-          !define EXE_NAME "EyeGuard.exe"
-
-          Name "${APP_NAME}"
-          OutFile "EyeGuard-Setup.exe"
-          InstallDir "$PROGRAMFILES\EyeGuard"
-          RequestExecutionLevel admin
-
-          Page directory
-          Page instfiles
-
-          Section "Install"
-              SetOutPath "$INSTDIR"
-              File "20-20-20-application\Windows\dist\EyeGuard.exe"
-
-              CreateShortcut "$DESKTOP\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
-              CreateShortcut "$SMPROGRAMS\Eye Guard.lnk" "$INSTDIR\${EXE_NAME}"
-
-              MessageBox MB_YESNO "Start Eye Guard automatically when Windows starts?" IDNO done
-                  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard" "$INSTDIR\${EXE_NAME}"
-              done:
-          SectionEnd
-
-          Section "Uninstall"
-              Delete "$INSTDIR\${EXE_NAME}"
-              Delete "$DESKTOP\Eye Guard.lnk"
-              Delete "$SMPROGRAMS\Eye Guard.lnk"
-              DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EyeGuard"
-              RMDir "$INSTDIR"
-          SectionEnd
-          '@
-
-          $nsi | Out-File -Encoding ASCII installer.nsi
-
-      - name: Compile NSIS installer
-        shell: powershell
-        run: |
-          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          & $makensis installer.nsi
-
-      - name: Create Windows zip package
-        shell: powershell
-        run: |
-          $zipDir = "EyeGuard-Windows"
-
-          New-Item -ItemType Directory -Force -Path $zipDir | Out-Null
-
-          Copy-Item "20-20-20-application\Windows\eye_guard_2020.pyw" "$zipDir\"
-          Copy-Item "20-20-20-application\Windows\install.bat" "$zipDir\"
-          Copy-Item "20-20-20-application\Windows\startup.bat" "$zipDir\"
-          Copy-Item "20-20-20-application\Windows\remove_startup.bat" "$zipDir\"
-          Copy-Item "20-20-20-application\README.md" "$zipDir\README.md"
-
-          Compress-Archive `
-            -Path "$zipDir\*" `
-            -DestinationPath "EyeGuard-Windows.zip" `
-            -Force
-
-      - name: Upload Windows installer to Release
-        uses: softprops/action-gh-release@v2
+          New-Item -ItemType Directory -Force EyeGuard-Windows | Out-Null
+          @("eye_guard_2020.pyw","install.bat","install.ps1","run.bat","startup.bat","remove_startup.bat","README.md") | ForEach-Object { Copy-Item "20-20-20-application/Windows/$_" EyeGuard-Windows/ }
+          Compress-Archive EyeGuard-Windows EyeGuard-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
         with:
-          files: EyeGuard-Setup.exe
-
-      - name: Upload Windows zip to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: EyeGuard-Windows.zip
-
-  # ── macOS Build ────────────────────────────────────────────────────────────
-  build-mac:
+          name: windows-release
+          path: |
+            EyeGuard-Setup.exe
+            EyeGuard-Windows.zip
+  macos:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: pip3 install pyinstaller rumps pyobjc Pillow
-
-      - name: Build .app with PyInstaller
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install pyinstaller rumps pyobjc Pillow
+      - name: Build app
         run: |
-          cd "20-20-20-application/Mac"
-          pyinstaller --onefile --windowed --name "EyeGuard" eye_guard_mac.py
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Create DMG
+          cd 20-20-20-application/Mac
+          pyinstaller --clean --noconfirm --windowed --name EyeGuard eye_guard_mac.py
+      - name: Build DMG
         run: |
-          create-dmg \
-            --volname "Eye Guard" \
-            --window-size 500 300 \
-            --icon-size 100 \
-            --icon "EyeGuard.app" 150 150 \
-            --app-drop-link 350 150 \
-            "EyeGuard.dmg" \
-            "20-20-20-application/Mac/dist/" || true
-
-      - name: Create Mac zip package
+          mkdir -p dmg-stage
+          cp -R 20-20-20-application/Mac/dist/EyeGuard.app dmg-stage/
+          ln -s /Applications dmg-stage/Applications
+          hdiutil create -volname EyeGuard -srcfolder dmg-stage -ov -format UDZO EyeGuard.dmg
+      - name: Package source ZIP
         run: |
           mkdir -p EyeGuard-Mac
-
-          cp 20-20-20-application/Mac/eye_guard_mac.py EyeGuard-Mac/
-          cp 20-20-20-application/README.md EyeGuard-Mac/README.md
-
-          cat > EyeGuard-Mac/setup.sh << 'EOF'
-          #!/bin/bash
-
-          echo "========================================"
-          echo "  20-20-20 Eye Guard - Setup"
-          echo "========================================"
-
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-
-          chmod +x \
-            "$DIR/setup.sh" \
-            "$DIR/run.sh" \
-            "$DIR/startup.sh" \
-            "$DIR/remove_startup.sh" 2>/dev/null
-
-          if ! command -v python3 &> /dev/null; then
-              echo "[ERROR] Python 3 not found."
-              echo "Install it from https://www.python.org/downloads/"
-              exit 1
-          fi
-
-          echo "[OK] $(python3 --version)"
-          echo "Creating virtual environment..."
-
-          python3 -m venv "$DIR/.venv"
-
-          echo "Installing dependencies..."
-
-          "$DIR/.venv/bin/pip" install --upgrade pip --quiet
-          "$DIR/.venv/bin/pip" install rumps pyobjc Pillow
-
-          if [ $? -ne 0 ]; then
-              echo "[ERROR] Could not install dependencies."
-              exit 1
-          fi
-
-          echo "========================================"
-          echo "  Setup complete!"
-          echo "  Run run.sh to launch Eye Guard."
-          echo "========================================"
-          EOF
-
-          cat > EyeGuard-Mac/run.sh << 'EOF'
-          #!/bin/bash
-
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          VENV_PYTHON="$DIR/.venv/bin/python3"
-
-          if [ ! -f "$VENV_PYTHON" ]; then
-              osascript -e 'display alert "Setup required" message "Please run setup.sh first."' 2>/dev/null
-              echo "Please run setup.sh first."
-              exit 1
-          fi
-
-          "$VENV_PYTHON" "$DIR/eye_guard_mac.py" &
-          EOF
-
-          cat > EyeGuard-Mac/startup.sh << 'EOF'
-          #!/bin/bash
-
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          VENV_PYTHON="$DIR/.venv/bin/python3"
-
-          if [ ! -f "$VENV_PYTHON" ]; then
-              echo "Please run setup.sh first."
-              exit 1
-          fi
-
-          read -p "Start Eye Guard automatically at login? (y/n): " confirm
-
-          if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-              echo "Cancelled."
-              exit 0
-          fi
-
-          PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
-
-          mkdir -p "$HOME/Library/LaunchAgents"
-
-          cat > "$PLIST" << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-
-          <plist version="1.0">
-          <dict>
-              <key>Label</key>
-              <string>com.eyeguard.2020</string>
-
-              <key>ProgramArguments</key>
-              <array>
-                  <string>$VENV_PYTHON</string>
-                  <string>$DIR/eye_guard_mac.py</string>
-              </array>
-
-              <key>RunAtLoad</key>
-              <true/>
-
-              <key>KeepAlive</key>
-              <false/>
-          </dict>
-          </plist>
-          PLIST
-
-          launchctl load "$PLIST"
-
-          echo "Done! Eye Guard will start automatically at login."
-          echo "To undo this, run remove_startup.sh."
-          EOF
-
-          cat > EyeGuard-Mac/remove_startup.sh << 'EOF'
-          #!/bin/bash
-
-          PLIST="$HOME/Library/LaunchAgents/com.eyeguard.2020.plist"
-
-          if [ ! -f "$PLIST" ]; then
-              echo "Eye Guard is not configured to run at startup."
-              exit 0
-          fi
-
-          launchctl unload "$PLIST"
-          rm "$PLIST"
-
-          echo "Eye Guard has been removed from startup."
-          EOF
-
-          chmod +x \
-            EyeGuard-Mac/setup.sh \
-            EyeGuard-Mac/run.sh \
-            EyeGuard-Mac/startup.sh \
-            EyeGuard-Mac/remove_startup.sh
-
-          zip -r EyeGuard-Mac.zip EyeGuard-Mac/
-
-      - name: Upload Mac DMG to Release
-        uses: softprops/action-gh-release@v2
+          cp 20-20-20-application/Mac/{eye_guard_mac.py,install_mac.sh,run.sh,startup_mac.sh,remove_startup_mac.sh,README.md} EyeGuard-Mac/
+          zip -qr EyeGuard-Mac.zip EyeGuard-Mac
+      - uses: actions/upload-artifact@v4
         with:
-          files: EyeGuard.dmg
-
-      - name: Upload Mac zip to Release
-        uses: softprops/action-gh-release@v2
+          name: macos-release
+          path: |
+            EyeGuard.dmg
+            EyeGuard-Mac.zip
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: EyeGuard-Mac.zip
+          pattern: '*-release'
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            EyeGuard-Setup.exe
+            EyeGuard-Windows.zip
+            EyeGuard.dmg
+            EyeGuard-Mac.zip
+          draft: true
+          generate_release_notes: true

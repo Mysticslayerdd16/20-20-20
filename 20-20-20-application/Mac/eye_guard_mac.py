@@ -17,6 +17,7 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
+from datetime import datetime
 
 try:
     import rumps
@@ -41,6 +42,8 @@ except ImportError:
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 WORK_MINUTES   = 20
+MIN_WORK_MINUTES = 1
+MAX_WORK_MINUTES = 180
 BREAK_SECONDS  = 20
 SKIP_LOCK_SECS = 10
 
@@ -115,6 +118,7 @@ stats = {
     "breaks_done":    0,
     "breaks_skipped": 0,
     "streak":         0,
+    "log":            [],
 }
 
 # ── Monitor helper ────────────────────────────────────────────────────────────
@@ -137,6 +141,8 @@ skip_lock_ref    = [SKIP_LOCK_SECS]
 break_left_ref   = [BREAK_SECONDS]
 skip_label_ref   = [None]
 count_label_ref  = [None]
+count_labels = []
+skip_labels = []
 skipped_ref      = [False]
 
 def make_label(text, font_size, bold=False, color=None, frame=None):
@@ -153,12 +159,15 @@ def make_label(text, font_size, bold=False, color=None, frame=None):
         label.setTextColor_(color)
     return label
 
-def show_overlays(app_ref):
+def show_overlays(app_ref, restart_timer=True):
     global overlay_windows
     overlay_windows = []
-    skipped_ref[0]    = False
-    break_left_ref[0] = BREAK_SECONDS
-    skip_lock_ref[0]  = SKIP_LOCK_SECS
+    count_labels.clear()
+    skip_labels.clear()
+    if restart_timer:
+        skipped_ref[0] = False
+        break_left_ref[0] = BREAK_SECONDS
+        skip_lock_ref[0] = SKIP_LOCK_SECS
 
     screens = get_all_screens()
 
@@ -171,7 +180,8 @@ def show_overlays(app_ref):
             False
         )
         win.setBackgroundColor_(NSColor.blackColor())
-        win.setLevel_(NSFloatingWindowLevel + 10)
+        win.setLevel_(NSFloatingWindowLevel)
+        win.setCollectionBehavior_(1 << 0 | 1 << 4)  # all Spaces, auxiliary fullscreen
         win.setOpaque_(True)
         win.setIgnoresMouseEvents_(False)
 
@@ -179,7 +189,7 @@ def show_overlays(app_ref):
         h  = frame.size.height
         cx = w / 2
 
-        if i == 0:
+        if True:
             green = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.24, 1.0, 0.56, 1.0)
             dim   = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.29, 0.47, 0.38, 1.0)
             dark  = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.2, 0.2, 0.2, 1.0)
@@ -197,6 +207,7 @@ def show_overlays(app_ref):
                                      frame=NSMakeRect(cx - 150, h * 0.32, 300, 130))
             win.contentView().addSubview_(count_label)
             count_label_ref[0] = count_label
+            count_labels.append(count_label)
 
             sec_label = make_label("seconds remaining", 13, color=dim,
                                    frame=NSMakeRect(cx - 150, h * 0.28, 300, 30))
@@ -206,38 +217,48 @@ def show_overlays(app_ref):
                                    frame=NSMakeRect(cx - 200, h * 0.18, 400, 24))
             win.contentView().addSubview_(skip_note)
             skip_label_ref[0] = skip_note
+            skip_labels.append(skip_note)
 
         win.makeKeyAndOrderFront_(None)
         win.setReleasedWhenClosed_(False)
         overlay_windows.append(win)
 
-    threading.Thread(target=beep_alert, daemon=True).start()
+    if restart_timer:
+        threading.Thread(target=beep_alert, daemon=True).start()
 
-    t = rumps.Timer(overlay_tick, 1)
-    t.app_ref = app_ref
-    t.start()
-    break_timer_ref[0] = t
+    if restart_timer:
+        t = rumps.Timer(overlay_tick, 1)
+        t.app_ref = app_ref
+        t.start()
+        break_timer_ref[0] = t
 
 def overlay_tick(timer):
     if skipped_ref[0]:
         return
+    current = tuple((str(screen.deviceDescription().get("NSScreenNumber")),
+                     str(screen.frame())) for screen in get_all_screens())
+    if current != getattr(timer.app_ref, "monitor_signature", None):
+        for win in overlay_windows:
+            win.orderOut_(None)
+        overlay_windows.clear()
+        show_overlays(timer.app_ref, restart_timer=False)
+        timer.app_ref.monitor_signature = current
 
     if skip_lock_ref[0] > 0:
         skip_lock_ref[0] -= 1
-        if skip_label_ref[0]:
+        for label in skip_labels:
             if skip_lock_ref[0] == 0:
-                skip_label_ref[0].setStringValue_("you can now skip (please don't)")
-                skip_label_ref[0].setTextColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 0.15, 0.15, 1.0))
+                label.setStringValue_("Skip from the menu bar (please don't)")
             else:
-                skip_label_ref[0].setStringValue_(f"skip unlocks in {skip_lock_ref[0]}s")
+                label.setStringValue_(f"skip available in {skip_lock_ref[0]}s")
 
+    timer.app_ref._update_menu()
     if break_left_ref[0] <= 0:
         complete_break(timer.app_ref)
         return
 
-    if count_label_ref[0]:
-        count_label_ref[0].setStringValue_(str(break_left_ref[0]))
+    for label in count_labels:
+        label.setStringValue_(str(break_left_ref[0]))
     break_left_ref[0] -= 1
 
 def close_overlays():
@@ -253,7 +274,8 @@ def complete_break(app_ref):
     stats["breaks_done"] += 1
     stats["streak"]      += 1
     threading.Thread(target=beep_done, daemon=True).start()
-    app_ref.work_left = WORK_MINUTES * 60
+    app_ref.work_left = app_ref.work_minutes * 60
+    app_ref._record_break("done")
     app_ref._update_menu()
 
 def skip_break(app_ref):
@@ -261,14 +283,16 @@ def skip_break(app_ref):
     close_overlays()
     stats["breaks_skipped"] += 1
     stats["streak"]          = 0
-    app_ref.work_left = WORK_MINUTES * 60
+    app_ref.work_left = app_ref.work_minutes * 60
+    app_ref._record_break("skipped")
     app_ref._update_menu()
 
 # ── Menu Bar App ──────────────────────────────────────────────────────────────
 class EyeGuardApp(rumps.App):
     def __init__(self):
         super().__init__("👁", quit_button=rumps.MenuItem("Quit Eye Guard"))
-        self.work_left = WORK_MINUTES * 60
+        self.work_minutes = self._load_interval()
+        self.work_left = self.work_minutes * 60
         self.paused    = False
 
         # Build startup toggle label based on current state
@@ -279,6 +303,8 @@ class EyeGuardApp(rumps.App):
             None,
             rumps.MenuItem("⏸  Pause",          callback=self.toggle_pause),
             rumps.MenuItem("↺  Reset Timer",     callback=self.reset_timer),
+            rumps.MenuItem("Set work interval...", callback=self.set_interval),
+            rumps.MenuItem("Skip current break", callback=self.skip_current_break),
             None,
             rumps.MenuItem("📊 Stats",           callback=None),
             None,
@@ -293,13 +319,17 @@ class EyeGuardApp(rumps.App):
         # First launch — ask about startup after a short delay so the menu bar settles
         if is_first_launch():
             mark_launched()
-            threading.Timer(2.0, prompt_startup).start()
+            # Prompt on the main application event loop, not a background thread.
+            self.first_launch_timer = rumps.Timer(self._first_launch_prompt, 2)
+            self.first_launch_timer.start()
 
     def _tick(self, timer):
         if self.paused:
             return
         if self.work_left <= 0:
             self.work_timer.stop()
+            self.monitor_signature = tuple((str(screen.deviceDescription().get("NSScreenNumber")),
+                                            str(screen.frame())) for screen in get_all_screens())
             show_overlays(self)
             return
         self.work_left -= 1
@@ -311,6 +341,10 @@ class EyeGuardApp(rumps.App):
         self.title = f"👁 {m:02d}:{s:02d}"
 
         try:
+            self.menu["Skip current break"].title = (
+                "Skip current break" if break_timer_ref[0] is not None and skip_lock_ref[0] == 0
+                else "Skip current break (locked)"
+            )
             self.menu["📊 Stats"].title = (
                 f"✓ {stats['breaks_done']} done   "
                 f"✗ {stats['breaks_skipped']} skipped   "
@@ -330,7 +364,7 @@ class EyeGuardApp(rumps.App):
 
     @rumps.clicked("↺  Reset Timer")
     def reset_timer(self, sender):
-        self.work_left = WORK_MINUTES * 60
+        self.work_left = self.work_minutes * 60
         self.paused    = False
         self.menu["⏸  Pause"].title = "⏸  Pause"
         if not self.work_timer.is_alive():
@@ -350,8 +384,53 @@ class EyeGuardApp(rumps.App):
             rumps.notification("Eye Guard", "Auto-start enabled",
                                "Eye Guard will now start automatically when you log in.")
 
-    def skip_current_break(self):
-        skip_break(self)
+    def _first_launch_prompt(self, timer):
+        timer.stop()
+        prompt_startup()
+
+    def _load_interval(self):
+        try:
+            with PREFS_FILE.open("rb") as f:
+                value = int(plistlib.load(f).get("work_minutes", WORK_MINUTES))
+            return value if MIN_WORK_MINUTES <= value <= MAX_WORK_MINUTES else WORK_MINUTES
+        except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+            return WORK_MINUTES
+
+    def set_interval(self, sender):
+        response = rumps.Window(message="Minutes between breaks (1–180)",
+                                title="EyeGuard work interval",
+                                default_text=str(self.work_minutes),
+                                ok="Apply", cancel="Cancel").run()
+        if not response.clicked:
+            return
+        try:
+            value = int(response.text.strip())
+            if not MIN_WORK_MINUTES <= value <= MAX_WORK_MINUTES:
+                raise ValueError()
+        except ValueError:
+            rumps.alert("Invalid interval", "Enter a whole number between 1 and 180.")
+            return
+        self.work_minutes = value
+        if break_timer_ref[0] is None:
+            self.work_left = value * 60
+        try:
+            with PREFS_FILE.open("rb") as f:
+                prefs = plistlib.load(f)
+        except (OSError, plistlib.InvalidFileException):
+            prefs = {}
+        prefs["work_minutes"] = value
+        PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with PREFS_FILE.open("wb") as f:
+            plistlib.dump(prefs, f)
+        self._update_menu()
+
+    def _record_break(self, outcome):
+        stats["log"].insert(0, f"{datetime.now():%H:%M} {outcome}")
+        stats["log"] = stats["log"][:10]
+
+    def skip_current_break(self, sender=None):
+        if break_timer_ref[0] is not None and skip_lock_ref[0] == 0:
+            skip_break(self)
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
